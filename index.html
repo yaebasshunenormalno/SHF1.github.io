@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+  <title>ШФ1 — Школьный форум №1</title>
+  <!-- Основные стили -->
+  <link rel="stylesheet" href="style.css">
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- CryptoJS для хеширования (необязательно, если используется Firebase Auth) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+  <!-- DOMPurify для защиты от XSS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+  <!-- Font Awesome для иконок -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+<div id="app">
+  <!-- ==================== ШАПКА ==================== -->
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo" id="homeBtn" title="На главную">📘 ШФ1</h1>
+      <span class="badge">школьный форум</span>
+      <span id="onlineStatus" class="badge" style="background:#1e4d2b; display: none;"><i class="fas fa-circle"></i> Онлайн</span>
+      <button id="mobileMenuToggle" class="mobile-menu-toggle" style="display: none;"><i class="fas fa-bars"></i> Меню</button>
+    </div>
+    <div class="header-right" id="authBlock">
+      <span id="loadingAuth"><i class="fas fa-spinner fa-pulse"></i> Загрузка...</span>
+    </div>
+  </header>
+
+  <!-- ==================== ПОИСК И ФИЛЬТРЫ ==================== -->
+  <div class="search-bar" id="searchBar" style="display: none;">
+    <div class="search-container">
+      <i class="fas fa-search search-icon"></i>
+      <input type="text" id="globalSearchInput" placeholder="Поиск по темам, сообщениям, пользователям..." />
+      <select id="searchType">
+        <option value="all">Везде</option>
+        <option value="threads">Темы</option>
+        <option value="posts">Сообщения</option>
+        <option value="users">Пользователи</option>
+      </select>
+      <button class="btn btn-sm btn-primary" id="globalSearchBtn"><i class="fas fa-search"></i> Найти</button>
+      <button class="btn btn-outline btn-sm" id="clearSearchBtn" style="display: none;"><i class="fas fa-times"></i> Сбросить</button>
+    </div>
+    <div class="search-filters" id="searchFilters" style="display: none;">
+      <label><input type="checkbox" id="filterByDate"> За период</label>
+      <input type="date" id="dateFrom" disabled> — <input type="date" id="dateTo" disabled>
+      <select id="filterByForum" disabled><option value="">Все разделы</option></select>
+      <button class="btn btn-sm" id="applyFiltersBtn" disabled>Применить</button>
+    </div>
+  </div>
+
+  <!-- ==================== НАВИГАЦИЯ ==================== -->
+  <nav class="navbar" id="navbar" style="display: none;">
+    <div class="nav-links">
+      <button data-view="forums"><i class="fas fa-folder-open"></i> Ветки</button>
+      <button data-view="messages"><i class="fas fa-envelope"></i> ЛС <span id="unreadBadge" class="unread-badge">0</span></button>
+      <button data-view="profile"><i class="fas fa-user"></i> Профиль</button>
+      <button data-view="members"><i class="fas fa-users"></i> Участники</button>
+      <button data-view="admin" id="adminNavBtn" style="display: none;"><i class="fas fa-shield-alt"></i> Админ</button>
+    </div>
+    <div class="nav-user">
+      <span id="navUsername"></span>
+      <button id="logoutNavBtn" class="logout-nav-btn" style="display: none;"><i class="fas fa-sign-out-alt"></i> Выйти</button>
+    </div>
+  </nav>
+
+  <!-- ==================== ХЛЕБНЫЕ КРОШКИ ==================== -->
+  <div class="breadcrumbs" id="breadcrumbs" style="display: none;">
+    <ul id="breadcrumbList"></ul>
+  </div>
+
+  <!-- ==================== ОСНОВНОЙ КОНТЕНТ ==================== -->
+  <main class="main-container" id="mainContainer">
+    <div id="viewLoader" class="loader">
+      <i class="fas fa-spinner fa-pulse fa-2x"></i>
+      <p>Загрузка форума...</p>
+    </div>
+  </main>
+
+  <!-- ==================== МОДАЛЬНОЕ ОКНО ==================== -->
+  <div class="modal" id="modal" style="display: none;">
+    <div class="modal-content">
+      <span class="modal-close" id="modalClose">&times;</span>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- ==================== КОНТЕКСТНОЕ МЕНЮ ==================== -->
+  <div class="context-menu" id="contextMenu" style="display: none;">
+    <ul>
+      <li data-action="edit"><i class="fas fa-edit"></i> Редактировать</li>
+      <li data-action="delete"><i class="fas fa-trash-alt"></i> Удалить</li>
+      <li data-action="report"><i class="fas fa-flag"></i> Пожаловаться</li>
+      <li class="divider"></li>
+      <li data-action="pin"><i class="fas fa-thumbtack"></i> Закрепить</li>
+      <li data-action="lock"><i class="fas fa-lock"></i> Закрыть</li>
+      <li data-action="move"><i class="fas fa-arrow-right"></i> Переместить</li>
+      <li data-action="copyLink"><i class="fas fa-link"></i> Копировать ссылку</li>
+      <li class="divider"></li>
+      <li data-action="modHistory"><i class="fas fa-history"></i> История модерации</li>
+    </ul>
+  </div>
+
+  <!-- ==================== ПАНЕЛЬ УВЕДОМЛЕНИЙ ==================== -->
+  <div id="toastContainer" class="toast-container">
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <!-- ==================== ИНДИКАТОР ГЛОБАЛЬНОЙ ЗАГРУЗКИ ==================== -->
+  <div id="globalLoadingOverlay" class="global-loading-overlay" style="display: none;">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ==================== БОКОВАЯ ПАНЕЛЬ (мобильная) ==================== -->
+  <div id="sidebarOverlay" class="sidebar-overlay" style="display: none;"></div>
+  <div id="mobileSidebar" class="mobile-sidebar" style="display: none;">
+    <div class="sidebar-header">
+      <span>Меню</span>
+      <button id="closeSidebarBtn">&times;</button>
+    </div>
+    <div class="sidebar-content" id="sidebarContent">
+      <!-- динамически заполняется -->
+    </div>
+  </div>
+
+  <!-- ==================== ШАБЛОНЫ (скрытые) ==================== -->
+
+  <!-- Шаблон элемента списка разделов -->
+  <template id="templateForumItem">
+    <div class="forum-item">
+      <div class="forum-icon"><i class="fas fa-comments"></i></div>
+      <div class="forum-info">
+        <h3 class="forum-name"></h3>
+        <p class="forum-desc"></p>
+        <div class="forum-meta">
+          <span class="forum-thread-count"><i class="fas fa-list"></i> Тем: <span>0</span></span>
+          <span class="forum-post-count"><i class="fas fa-reply-all"></i> Сообщений: <span>0</span></span>
+          <span class="forum-last-post"><i class="far fa-clock"></i> Последнее: <span></span></span>
+        </div>
+      </div>
+      <div class="forum-actions" style="display: none;"></div>
+    </div>
+  </template>
+
+  <!-- Шаблон элемента списка тем -->
+  <template id="templateThreadItem">
+    <div class="thread-item">
+      <div class="thread-icon">
+        <i class="fas fa-comment"></i>
+        <span class="thread-pinned-badge" style="display: none;"><i class="fas fa-thumbtack"></i></span>
+        <span class="thread-locked-badge" style="display: none;"><i class="fas fa-lock"></i></span>
+      </div>
+      <div class="thread-info">
+        <h4 class="thread-title"></h4>
+        <div class="thread-meta">
+          <span class="thread-author"><i class="fas fa-user"></i> <span></span></span>
+          <span class="thread-date"><i class="far fa-calendar-alt"></i> <span></span></span>
+          <span class="thread-replies"><i class="fas fa-reply"></i> Ответов: <span>0</span></span>
+          <span class="thread-views"><i class="far fa-eye"></i> Просмотров: <span>0</span></span>
+        </div>
+      </div>
+      <div class="thread-last">
+        <span class="last-post-author"></span>
+        <span class="last-post-date"></span>
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон сообщения (поста) в теме -->
+  <template id="templatePostItem">
+    <div class="post-item" data-post-id="">
+      <div class="post-header">
+        <div class="post-author">
+          <img class="post-avatar" src="" alt="avatar">
+          <span class="post-author-name"></span>
+          <span class="post-author-role"></span>
+        </div>
+        <div class="post-meta">
+          <span class="post-date"><i class="far fa-clock"></i> <span></span></span>
+          <span class="post-number">#<span></span></span>
+        </div>
+      </div>
+      <div class="post-content"></div>
+      <div class="post-footer">
+        <div class="post-actions">
+          <button class="btn-icon" data-action="reply"><i class="fas fa-reply"></i> Ответить</button>
+          <button class="btn-icon" data-action="quote"><i class="fas fa-quote-right"></i> Цитировать</button>
+          <button class="btn-icon" data-action="like"><i class="far fa-heart"></i> <span class="like-count">0</span></button>
+          <button class="btn-icon" data-action="report"><i class="fas fa-flag"></i></button>
+          <button class="btn-icon post-menu-trigger"><i class="fas fa-ellipsis-v"></i></button>
+        </div>
+        <div class="post-signature"></div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон элемента диалога (ЛС) -->
+  <template id="templateMessageItem">
+    <div class="message-item">
+      <div class="message-avatar"><img src="" alt=""></div>
+      <div class="message-body">
+        <div class="message-header">
+          <span class="message-sender"></span>
+          <span class="message-date"></span>
+        </div>
+        <div class="message-content"></div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон элемента списка пользователей (для админки и участников) -->
+  <template id="templateUserItem">
+    <div class="user-item">
+      <div class="user-avatar"><img src="" alt=""></div>
+      <div class="user-info">
+        <span class="user-name"></span>
+        <span class="user-role"></span>
+        <span class="user-status"></span>
+      </div>
+      <div class="user-actions">
+        <button class="btn-icon" data-action="message"><i class="fas fa-envelope"></i></button>
+        <button class="btn-icon" data-action="profile"><i class="fas fa-user"></i></button>
+      </div>
+    </div>
+  </template>
+
+  <!-- ==================== СКРЫТЫЕ ФОРМЫ И МОДАЛЬНЫЕ ОКНА (шаблоны содержимого) ==================== -->
+
+  <!-- Форма входа/регистрации (будет вставляться в модальное окно) -->
+  <template id="templateAuthForm">
+    <div class="auth-form-container">
+      <h2 id="authTitle">Вход</h2>
+      <form id="authForm">
+        <div class="form-group">
+          <label for="authEmail"><i class="fas fa-envelope"></i> Email</label>
+          <input type="email" id="authEmail" required autocomplete="email">
+        </div>
+        <div class="form-group">
+          <label for="authPassword"><i class="fas fa-lock"></i> Пароль</label>
+          <input type="password" id="authPassword" required minlength="6">
+        </div>
+        <div class="form-group" id="authNameGroup" style="display: none;">
+          <label for="authDisplayName"><i class="fas fa-user"></i> Имя (ник)</label>
+          <input type="text" id="authDisplayName" maxlength="30">
+        </div>
+        <div class="form-group" id="authCodeGroup" style="display: none;">
+          <label for="authSchoolCode"><i class="fas fa-shield"></i> Кодовое слово</label>
+          <input type="text" id="authSchoolCode" placeholder="Для модератора">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;" id="authSubmitBtn">Войти</button>
+        <p class="auth-switch">Нет аккаунта? <a href="#" id="switchToRegister">Зарегистрироваться</a></p>
+      </form>
+    </div>
+  </template>
+
+  <!-- Форма создания/редактирования раздела (админ) -->
+  <template id="templateForumForm">
+    <h2 id="forumFormTitle">Создать раздел</h2>
+    <form id="forumForm">
+      <div class="form-group">
+        <label for="forumName">Название раздела</label>
+        <input type="text" id="forumName" required maxlength="50">
+      </div>
+      <div class="form-group">
+        <label for="forumDesc">Описание</label>
+        <textarea id="forumDesc" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="forumIcon">Иконка (Font Awesome класс)</label>
+        <input type="text" id="forumIcon" placeholder="fa-comments">
+      </div>
+      <div class="form-group">
+        <label for="forumOrder">Порядок</label>
+        <input type="number" id="forumOrder" value="0">
+      </div>
+      <input type="hidden" id="forumId" value="">
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" id="cancelForumBtn">Отмена</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </template>
+
+  <!-- Форма создания/редактирования темы -->
+  <template id="templateThreadForm">
+    <h2 id="threadFormTitle">Новая тема</h2>
+    <form id="threadForm">
+      <div class="form-group">
+        <label for="threadTitle">Заголовок</label>
+        <input type="text" id="threadTitle" required maxlength="100">
+      </div>
+      <div class="form-group">
+        <label for="threadContent">Сообщение</label>
+        <div class="editor-toolbar">
+          <button type="button" data-command="bold"><i class="fas fa-bold"></i></button>
+          <button type="button" data-command="italic"><i class="fas fa-italic"></i></button>
+          <button type="button" data-command="underline"><i class="fas fa-underline"></i></button>
+          <button type="button" data-command="insertUnorderedList"><i class="fas fa-list-ul"></i></button>
+          <button type="button" data-command="insertOrderedList"><i class="fas fa-list-ol"></i></button>
+          <button type="button" data-command="createLink"><i class="fas fa-link"></i></button>
+          <button type="button" data-command="insertImage"><i class="fas fa-image"></i></button>
+          <button type="button" data-command="formatBlock" data-value="blockquote"><i class="fas fa-quote-right"></i></button>
+        </div>
+        <div id="threadContentEditor" class="editor-content" contenteditable="true"></div>
+        <input type="hidden" id="threadContentHtml">
+      </div>
+      <div class="form-group">
+        <label for="threadTags">Теги (через запятую)</label>
+        <input type="text" id="threadTags" placeholder="школа, математика">
+      </div>
+      <input type="hidden" id="threadForumId" value="">
+      <input type="hidden" id="threadId" value="">
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" id="cancelThreadBtn">Отмена</button>
+        <button type="submit" class="btn btn-primary">Создать</button>
+      </div>
+    </form>
+  </template>
+
+  <!-- Форма ответа / быстрого ответа -->
+  <template id="templatePostForm">
+    <h2>Ответ в теме</h2>
+    <form id="postForm">
+      <div class="form-group">
+        <label for="postContent">Сообщение</label>
+        <div class="editor-toolbar">
+          <button type="button" data-command="bold"><i class="fas fa-bold"></i></button>
+          <button type="button" data-command="italic"><i class="fas fa-italic"></i></button>
+          <button type="button" data-command="underline"><i class="fas fa-underline"></i></button>
+          <button type="button" data-command="insertUnorderedList"><i class="fas fa-list-ul"></i></button>
+          <button type="button" data-command="insertOrderedList"><i class="fas fa-list-ol"></i></button>
+          <button type="button" data-command="createLink"><i class="fas fa-link"></i></button>
+          <button type="button" data-command="insertImage"><i class="fas fa-image"></i></button>
+          <button type="button" data-command="formatBlock" data-value="blockquote"><i class="fas fa-quote-right"></i></button>
+        </div>
+        <div id="postContentEditor" class="editor-content" contenteditable="true"></div>
+        <input type="hidden" id="postContentHtml">
+      </div>
+      <input type="hidden" id="postThreadId" value="">
+      <input type="hidden" id="quotePostId" value="">
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" id="cancelPostBtn">Отмена</button>
+        <button type="submit" class="btn btn-primary">Отправить</button>
+      </div>
+    </form>
+  </template>
+
+  <!-- Шаблон страницы профиля -->
+  <template id="templateProfilePage">
+    <div class="card">
+      <div class="profile-header">
+        <div class="profile-avatar">
+          <img id="profileAvatarImg" src="" alt="avatar">
+          <button class="btn btn-sm btn-outline" id="changeAvatarBtn" style="margin-top:10px; display: none;">Сменить аватар</button>
+        </div>
+        <div class="profile-info">
+          <h2 class="profile-name" id="profileDisplayName"></h2>
+          <span class="profile-role" id="profileRole"></span>
+          <p><i class="far fa-calendar-alt"></i> <span id="profileRegistered"></span></p>
+          <p><i class="fas fa-pencil-alt"></i> <span id="profileSignature"></span></p>
+          <div class="profile-stats">
+            <div class="stat-item"><span class="stat-value" id="profileThreadsCount">0</span><span class="stat-label">Тем</span></div>
+            <div class="stat-item"><span class="stat-value" id="profilePostsCount">0</span><span class="stat-label">Сообщений</span></div>
+          </div>
+          <div id="profileActions">
+            <button class="btn btn-primary" id="editProfileBtn">Редактировать профиль</button>
+            <button class="btn btn-primary" id="sendMessageToUserBtn" style="display:none;"><i class="fas fa-envelope"></i> Написать</button>
+          </div>
+        </div>
+      </div>
+      <div class="profile-tabs">
+        <button class="profile-tab active" data-tab="activity">Активность</button>
+        <button class="profile-tab" data-tab="threads">Темы</button>
+        <button class="profile-tab" data-tab="posts">Сообщения</button>
+      </div>
+      <div id="profileTabContent" class="profile-tab-content">
+        <!-- динамически -->
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон панели администратора -->
+  <template id="templateAdminPanel">
+    <div class="card">
+      <div class="card-header">
+        <h2><i class="fas fa-shield-alt"></i> Панель управления</h2>
+      </div>
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="users">Пользователи</button>
+        <button class="admin-tab" data-tab="reports">Жалобы</button>
+        <button class="admin-tab" data-tab="forums">Разделы</button>
+        <button class="admin-tab" data-tab="logs">Логи</button>
+      </div>
+      <div id="adminTabContent" class="admin-tab-content">
+        <!-- динамически -->
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон списка участников -->
+  <template id="templateMembersPage">
+    <div class="card">
+      <div class="card-header">
+        <h2><i class="fas fa-users"></i> Участники форума</h2>
+        <div class="members-filters">
+          <input type="text" id="membersSearch" placeholder="Поиск...">
+          <select id="membersRoleFilter">
+            <option value="all">Все</option>
+            <option value="admin">Администраторы</option>
+            <option value="moderator">Модераторы</option>
+            <option value="user">Пользователи</option>
+          </select>
+          <select id="membersSort">
+            <option value="name">По имени</option>
+            <option value="date">По дате регистрации</option>
+            <option value="posts">По активности</option>
+          </select>
+        </div>
+      </div>
+      <div id="membersList" class="members-list">
+        <!-- динамически -->
+      </div>
+      <div id="membersPagination" class="pagination"></div>
+    </div>
+  </template>
+
+  <!-- Шаблон страницы личных сообщений (диалоги) -->
+  <template id="templateMessagesPage">
+    <div class="card">
+      <div class="card-header">
+        <h2><i class="fas fa-envelope"></i> Личные сообщения</h2>
+        <button class="btn btn-primary" id="newMessageBtn"><i class="fas fa-plus"></i> Новое сообщение</button>
+      </div>
+      <div id="conversationsList" class="message-list">
+        <!-- динамически -->
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон диалога (переписка с пользователем) -->
+  <template id="templateDialogView">
+    <div class="card">
+      <div class="card-header">
+        <h2><i class="fas fa-user"></i> Диалог с <span id="dialogUserName"></span></h2>
+        <button class="btn btn-outline btn-sm" id="backToMessagesBtn"><i class="fas fa-arrow-left"></i> Назад</button>
+      </div>
+      <div id="dialogMessages" class="dialog-messages" style="max-height:500px; overflow-y:auto;">
+        <!-- динамически -->
+      </div>
+      <div class="dialog-input">
+        <form id="sendMessageForm">
+          <textarea id="messageInput" placeholder="Ваше сообщение..." rows="3"></textarea>
+          <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Отправить</button>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <!-- Шаблон пагинации -->
+  <template id="templatePagination">
+    <div class="pagination">
+      <button class="pagination-prev" disabled><i class="fas fa-chevron-left"></i></button>
+      <span class="pagination-info">Страница 1 из 1</span>
+      <button class="pagination-next" disabled><i class="fas fa-chevron-right"></i></button>
+    </div>
+  </template>
+
+  <!-- Шаблон жалобы (модальное окно) -->
+  <template id="templateReportForm">
+    <h2>Пожаловаться</h2>
+    <form id="reportForm">
+      <p>Вы жалуетесь на <span id="reportTargetDesc"></span></p>
+      <div class="form-group">
+        <label for="reportReason">Причина</label>
+        <select id="reportReason" required>
+          <option value="">Выберите причину</option>
+          <option value="spam">Спам</option>
+          <option value="offensive">Оскорбление</option>
+          <option value="inappropriate">Неприемлемый контент</option>
+          <option value="other">Другое</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="reportDetails">Подробности</label>
+        <textarea id="reportDetails" rows="3"></textarea>
+      </div>
+      <input type="hidden" id="reportTargetType" value="">
+      <input type="hidden" id="reportTargetId" value="">
+      <div class="form-actions">
+        <button type="button" class="btn btn-outline" id="cancelReportBtn">Отмена</button>
+        <button type="submit" class="btn btn-danger">Отправить жалобу</button>
+      </div>
+    </form>
+  </template>
+
+  <!-- Шаблон модального окна подтверждения -->
+  <template id="templateConfirmDialog">
+    <h2 id="confirmTitle">Подтверждение</h2>
+    <p id="confirmMessage"></p>
+    <div class="form-actions">
+      <button class="btn btn-outline" id="confirmCancelBtn">Отмена</button>
+      <button class="btn btn-danger" id="confirmOkBtn">Подтвердить</button>
+    </div>
+  </template>
+
+  <!-- Шаблон быстрого просмотра профиля (всплывающая подсказка) -->
+  <template id="templateUserTooltip">
+    <div class="user-tooltip">
+      <img class="tooltip-avatar" src="" alt="">
+      <div class="tooltip-info">
+        <span class="tooltip-name"></span>
+        <span class="tooltip-role"></span>
+        <span class="tooltip-stats"></span>
+      </div>
+    </div>
+  </template>
+
+  <!-- ==================== ДОПОЛНИТЕЛЬНЫЕ ЭЛЕМЕНТЫ (для объёма) ==================== -->
+  <!-- Кнопка "наверх" -->
+  <button id="scrollToTopBtn" class="scroll-to-top" style="display: none;"><i class="fas fa-arrow-up"></i></button>
+
+  <!-- Скрытое поле для хранения конфигурации -->
+  <input type="hidden" id="appConfig" data-version="3.0.0">
+
+  <!-- Динамические стили для адаптации высоты -->
+  <style>
+    /* Встроенные стили для динамических элементов (опционально) */
+    .dialog-messages { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+    .dialog-message.own { align-items: flex-end; }
+    .dialog-message { display: flex; flex-direction: column; }
+    .user-tooltip { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-card); border-radius: var(--radius-sm); box-shadow: var(--shadow); }
+    .tooltip-avatar { width: 40px; height: 40px; border-radius: 50%; }
+    .scroll-to-top { position: fixed; bottom: 30px; right: 30px; background: var(--accent); color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; box-shadow: var(--shadow); z-index: 500; }
+    .members-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
+    .user-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-secondary); border-radius: var(--radius-sm); }
+    .user-avatar img { width: 40px; height: 40px; border-radius: 50%; }
+    .profile-tabs { display: flex; gap: 5px; margin: 20px 0; border-bottom: 1px solid var(--border); }
+    .profile-tab { background: none; border: none; color: var(--text-secondary); padding: 10px 20px; cursor: pointer; }
+    .profile-tab.active { color: white; border-bottom: 2px solid var(--accent); }
+  </style>
+</div>
+<script src="script.js"></script>
+</body>
+</html>
